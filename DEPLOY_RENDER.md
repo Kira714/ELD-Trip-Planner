@@ -8,7 +8,7 @@ This project is configured for Render Blueprint deployment using `render.yaml`.
 - `eld-trip-planner-frontend` (Static site, Vite build)
 - `eld-trip-planner-db` (PostgreSQL)
 
-All services are configured to `plan: free` in `render.yaml`.
+Backend is configured with `plan: free`. Frontend static service uses Render's default static plan (no explicit `plan` key).
 
 ## One-Time Setup
 

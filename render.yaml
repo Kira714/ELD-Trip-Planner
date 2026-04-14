@@ -28,7 +28,6 @@ services:
   - type: web
     name: eld-trip-planner-frontend
     env: static
-    plan: free
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
