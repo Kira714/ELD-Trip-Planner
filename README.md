@@ -22,6 +22,67 @@ Core user flow:
 4. Review map and daily logs
 5. Export PDF or open prefilled paper log
 
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+  U[Driver / Dispatcher] --> F[React Frontend]
+  F -->|GET /api/location-suggest| B[Django API]
+  F -->|POST /api/calculate-trip| B
+  B --> G[Nominatim Geocoding]
+  B --> R[OSRM Routing]
+  B --> H[HOS Scheduler Engine]
+  H --> B
+  B -->|trip_summary + route + daily_logs| F
+  F --> C[ELD Canvas Renderer]
+  C --> P[PDF Export]
+  F --> L[Prefilled Paper Log HTML]
+```
+
+## Request Flow (Trip Calculation)
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant FE as Frontend (React)
+  participant API as Backend (Django)
+  participant N as Nominatim
+  participant O as OSRM
+  participant S as HOS Scheduler
+
+  User->>FE: Fill driver + route inputs
+  FE->>API: POST /api/calculate-trip
+  API->>N: Geocode current/pickup/dropoff
+  N-->>API: Coordinates
+  API->>O: Route geometry + leg distances
+  O-->>API: Route data (or timeout)
+  API->>S: Run FMCSA schedule simulation
+  S-->>API: daily_logs + stop_events + summary
+  API-->>FE: JSON response
+  FE-->>User: Route map, ELD logs, PDF/paper log options
+```
+
+## HOS Engine Flow
+
+```mermaid
+flowchart TD
+  A[Start Shift] --> B[Pre-trip inspection]
+  B --> C[Drive segment loop]
+  C --> D{11h drive hit?}
+  D -- Yes --> E[End shift]
+  D -- No --> F{8h since break?}
+  F -- Yes --> G[30-min break]
+  F -- No --> H{Fuel due at 1000mi?}
+  H -- Yes --> I[Fuel stop]
+  H -- No --> J{Reached pickup/dropoff?}
+  J -- No --> C
+  J -- Yes --> K[On-duty handling for pickup/dropoff]
+  K --> L{Trip complete?}
+  L -- No --> C
+  L -- Yes --> M[Post-trip + 10h off-duty]
+  M --> N[Close day logs + totals]
+```
+
 ## Screenshots
 
 ### Route Map View
@@ -97,6 +158,80 @@ Example request:
   "pickup_location": "St Louis, MO",
   "dropoff_location": "Dallas, TX",
   "current_cycle_used": 14.5
+}
+```
+
+## Key Code Snippets
+
+### Backend API Route Wiring
+
+```python
+# backend/eldapp/urls.py
+urlpatterns = [
+    path('healthz/', HealthCheckView.as_view(), name='healthz'),
+    path('location-suggest/', LocationSuggestView.as_view(), name='location-suggest'),
+    path('calculate-trip/', CalculateTripView.as_view(), name='calculate-trip'),
+]
+```
+
+### Trip Calculation Endpoint Skeleton
+
+```python
+# backend/eldapp/views.py
+class CalculateTripView(APIView):
+    def post(self, request):
+        data = request.data
+        # validate payload
+        # geocode current/pickup/dropoff (parallel)
+        # fetch route geometry + distances
+        # run calculate_trip_schedule(...)
+        # return driver_info + route + daily_logs + trip_summary
+```
+
+### HOS Rule Constants
+
+```python
+# backend/eldapp/hos_calculator.py
+MAX_DRIVING_HOURS = 11.0
+MAX_WINDOW_HOURS = 14.0
+REQUIRED_OFF_DUTY_HOURS = 10.0
+MAX_CYCLE_HOURS = 70.0
+BREAK_TRIGGER_HOURS = 8.0
+BREAK_DURATION_HOURS = 0.5
+FUEL_INTERVAL_MILES = 1000.0
+```
+
+### Backend Environment-Driven Settings
+
+```python
+# backend/config/settings.py
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0').split(',')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get('CORS_ALLOWED_ORIGINS', '').split(',') if origin.strip()]
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if origin.strip()]
+```
+
+### Frontend API Client + Timeout Handling
+
+```javascript
+// frontend/src/utils/api.js
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || '',
+  timeout: 45000,
+  headers: { 'Content-Type': 'application/json' },
+})
+```
+
+### ELD Log Normalization Before Render
+
+```javascript
+// frontend/src/components/ELDLogCanvas.jsx
+export function prepareLogForRender(log) {
+  // normalize/clamp segments to 0..24
+  // fill gaps with off-duty
+  // merge adjacent same-status segments
+  // recompute totals from normalized segments
+  return { segments, totals, totalHours: 24 }
 }
 ```
 
