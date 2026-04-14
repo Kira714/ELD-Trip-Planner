@@ -6,7 +6,7 @@ This project is configured for Render Blueprint deployment using `render.yaml`.
 
 - `eld-trip-planner-backend` (Python web service, Gunicorn)
 - `eld-trip-planner-frontend` (Static site, Vite build)
-- `eld-trip-planner-db` (PostgreSQL)
+- No Render managed database is provisioned by blueprint.
 
 Backend is configured with `plan: free`. Frontend static service uses Render's default static plan (no explicit `plan` key).
 
@@ -15,9 +15,7 @@ Backend is configured with `plan: free`. Frontend static service uses Render's d
 1. Push this repository to GitHub.
 2. In Render, click **New +** -> **Blueprint**.
 3. Select your repo and confirm `render.yaml`.
-4. Render will provision backend, frontend, and database.
-
-If your Render account/region does not offer a free PostgreSQL instance, create a free Neon or Supabase Postgres DB and set `DATABASE_URL` manually on backend, then remove/comment the `databases:` block from `render.yaml`.
+4. Render will provision backend and frontend only.
 
 ## Important Post-Deploy Update
 
@@ -31,6 +29,8 @@ If Render assigned different names than defaults in `render.yaml`, update:
 
 - backend `DJANGO_ALLOWED_HOSTS` to your backend host
 - frontend `VITE_API_URL` to your backend URL
+
+Optional: if you later want PostgreSQL, set backend `DATABASE_URL` to Neon/Supabase/Render Postgres manually.
 
 ## Runtime Details
 
@@ -50,5 +50,5 @@ From project root:
 ## Notes
 
 - `DJANGO_DEBUG` is `False` by default.
-- Database uses `DATABASE_URL` when present (PostgreSQL on Render).
+- Database uses local SQLite by default. If `DATABASE_URL` is set, backend uses PostgreSQL.
 - If backend URL changes, redeploy frontend after updating `VITE_API_URL`.

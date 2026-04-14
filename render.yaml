@@ -20,10 +20,6 @@ services:
         value: https://eld-trip-planner-frontend.onrender.com,https://eld-trip-planner-backend.onrender.com
       - key: DJANGO_SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: eld-trip-planner-db
-          property: connectionString
 
   - type: web
     name: eld-trip-planner-frontend
@@ -36,6 +32,3 @@ services:
       - key: VITE_API_URL
         value: https://eld-trip-planner-backend.onrender.com
 
-databases:
-  - name: eld-trip-planner-db
-    plan: free
