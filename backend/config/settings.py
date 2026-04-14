@@ -108,7 +108,7 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # In dev allow all; restrict in production
+CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'False') == 'True' or DEBUG
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

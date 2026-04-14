@@ -31,6 +31,7 @@ If Render assigned different names than defaults in `render.yaml`, update:
 
 - backend `DJANGO_ALLOWED_HOSTS` to your backend host
 - frontend `VITE_API_URL` to your backend URL
+- backend `CSRF_TRUSTED_ORIGINS` to include your deployed backend URL
 
 Optional: if you later want PostgreSQL, set backend `DATABASE_URL` to Neon/Supabase/Render Postgres manually.
 
