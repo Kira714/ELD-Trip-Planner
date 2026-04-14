@@ -1,0 +1,20 @@
+[Unit]
+Description=ELD Trip Planner Django Backend (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/airbyte-platform/airbyte-common-handler-3/eld-trip-planner/backend
+Environment=DJANGO_SETTINGS_MODULE=config.settings
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/env gunicorn config.wsgi:application --config gunicorn.conf.py
+Restart=always
+RestartSec=2
+TimeoutStartSec=30
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

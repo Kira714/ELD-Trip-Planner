@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drivers Daily Log</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f6f7fb; color: #111; }
+    .wrap { max-width: 1100px; margin: 16px auto; background: #fff; border: 1px solid #d0d7de; border-radius: 12px; padding: 16px; }
+    h1 { margin: 0 0 10px; font-size: 28px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+    label { display: grid; grid-template-columns: 180px 1fr; gap: 8px; align-items: center; font-size: 13px; }
+    input, textarea { width: 100%; border: 1px solid #888; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+    textarea { min-height: 64px; resize: vertical; }
+    .chart { margin-top: 14px; border: 1px solid #222; overflow-x: auto; }
+    .scale, .rows { display: grid; grid-template-columns: 160px repeat(24, 1fr) 120px; min-width: 980px; }
+    .scale > div { background: #111; color: #fff; font-size: 11px; text-align: center; border-right: 1px solid #333; padding: 6px 4px; }
+    .scale > div:first-child { text-align: left; padding-left: 8px; font-weight: 700; }
+    .rows .label, .rows .total, .rows .cell { border-right: 1px solid #888; border-bottom: 1px solid #888; min-height: 36px; }
+    .rows .label { font-weight: 700; display: flex; align-items: center; padding: 6px 8px; }
+    .rows .total { display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .rows .cell { position: relative; }
+    .rows .cell::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,0.14); }
+    .active { background: #1f6feb; }
+    .line-area { margin-top: 10px; border: 1px solid #999; padding: 8px; }
+    #lineSvg { width: 100%; height: 180px; display: block; border: 1px solid #bbb; }
+    .actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button, select { border: 1px solid #666; border-radius: 6px; background: white; padding: 7px 10px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Drivers Daily Log</h1>
+    <section class="grid">
+      <label>Date <input id="date" /></label>
+      <label>Driver Name <input id="driverName" /></label>
+      <label>Carrier <input id="carrier" /></label>
+      <label>From <input id="from" /></label>
+      <label>To <input id="to" /></label>
+      <label>Total Miles Driving Today <input id="milesDriving" type="number" min="0" /></label>
+      <label>Total Mileage Today <input id="mileageToday" type="number" min="0" /></label>
+      <label>Main Office Address <input id="officeAddress" /></label>
+      <label>Home Terminal Address <input id="terminalAddress" /></label>
+      <label>Truck/Trailer/Plate-State <input id="truckInfo" /></label>
+      <label>DVL or Manifest No. <input id="manifest" /></label>
+      <label>Shipper & Commodity <input id="commodity" /></label>
+      <label>Shipping Documents <input id="shippingDocs" /></label>
+    </section>
+
+    <section class="chart">
+      <div class="scale" id="scale"></div>
+      <div class="rows" id="rows"></div>
+      <div class="line-area">
+        <strong>Duty Step Line</strong>
+        <svg id="lineSvg" viewBox="0 0 960 160" preserveAspectRatio="none"></svg>
+      </div>
+    </section>
+
+    <div class="actions">
+      <label>Status
+        <select id="statusPicker">
+          <option value="0">Off Duty</option>
+          <option value="1">Sleeper Berth</option>
+          <option value="2">Driving</option>
+          <option value="3">On Duty (not driving)</option>
+        </select>
+      </label>
+      <button id="clearDay">Clear Day</button>
+      <button id="exportJson">Export JSON</button>
+    </div>
+
+    <section class="grid" style="margin-top: 10px;">
+      <label>Remarks <textarea id="remarks"></textarea></label>
+      <label>Duty Change Notes <textarea id="dutyNotes"></textarea></label>
+    </section>
+  </main>
+  <script>
+    const statuses = ["Off Duty", "Sleeper Berth", "Driving", "On Duty (not driving)"];
+    const rows = document.getElementById("rows");
+    const scale = document.getElementById("scale");
+    const lineSvg = document.getElementById("lineSvg");
+    const statusPicker = document.getElementById("statusPicker");
+
+    let hourStatus = new Array(24).fill(0);
+    let dragging = false;
+
+    function renderScale() {
+      const labels = ["Time", "Midnight", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "Noon", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "Midnight", "Total Hours"];
+      scale.innerHTML = labels.map((l) => `<div>${l}</div>`).join("");
+    }
+
+    function renderRows() {
+      rows.innerHTML = "";
+      for (let row = 0; row < 4; row += 1) {
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = `${row + 1}. ${statuses[row]}`;
+        rows.appendChild(label);
+        for (let hour = 0; hour < 24; hour += 1) {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          cell.dataset.row = String(row);
+          cell.dataset.hour = String(hour);
+          cell.addEventListener("mousedown", () => {
+            dragging = true;
+            hourStatus[hour] = Number(statusPicker.value);
+            paint();
+          });
+          cell.addEventListener("mouseenter", () => {
+            if (!dragging) return;
+            hourStatus[hour] = Number(statusPicker.value);
+            paint();
+          });
+          rows.appendChild(cell);
+        }
+        const total = document.createElement("div");
+        total.className = "total";
+        total.id = `total-${row}`;
+        rows.appendChild(total);
+      }
+    }
+
+    function drawStepLine() {
+      const width = 960;
+      const rowHeight = 40;
+      const hourWidth = width / 24;
+      const yOf = (status) => status * rowHeight + rowHeight / 2;
+      let guides = "";
+      for (let y = 0; y <= 4; y += 1) guides += `<line x1="0" y1="${y * rowHeight}" x2="${width}" y2="${y * rowHeight}" stroke="#999" stroke-width="0.8"/>`;
+      for (let h = 0; h <= 24; h += 1) guides += `<line x1="${h * hourWidth}" y1="0" x2="${h * hourWidth}" y2="160" stroke="#ddd" stroke-width="0.8"/>`;
+
+      let d = `M 0 ${yOf(hourStatus[0])}`;
+      for (let h = 0; h < 24; h += 1) {
+        const x1 = h * hourWidth;
+        const x2 = (h + 1) * hourWidth;
+        const y = yOf(hourStatus[h]);
+        d += ` L ${x1} ${y} L ${x2} ${y}`;
+        if (h < 23 && hourStatus[h + 1] !== hourStatus[h]) d += ` L ${x2} ${yOf(hourStatus[h + 1])}`;
+      }
+      lineSvg.innerHTML = `${guides}<path d="${d}" fill="none" stroke="#d1242f" stroke-width="3"/>`;
+    }
+
+    function paint() {
+      document.querySelectorAll(".cell").forEach((c) => c.classList.remove("active"));
+      for (let h = 0; h < 24; h += 1) {
+        const row = hourStatus[h];
+        const cell = document.querySelector(`.cell[data-row="${row}"][data-hour="${h}"]`);
+        if (cell) cell.classList.add("active");
+      }
+      for (let row = 0; row < 4; row += 1) {
+        const total = hourStatus.filter((x) => x === row).length;
+        document.getElementById(`total-${row}`).textContent = total.toFixed(1);
+      }
+      drawStepLine();
+    }
+
+    function prefillFromQuery() {
+      const params = new URLSearchParams(window.location.search);
+      const prefillKey = params.get("prefillKey");
+      const encoded = params.get("prefill");
+      if (!prefillKey && !encoded) return;
+      try {
+        let parsed = null;
+        if (prefillKey) {
+          const stored = localStorage.getItem(prefillKey);
+          if (stored) {
+            parsed = JSON.parse(stored);
+            // One-time consume to avoid stale data.
+            localStorage.removeItem(prefillKey);
+          }
+        }
+        if (!parsed && encoded) {
+          parsed = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(encoded)))));
+        }
+        if (!parsed) return;
+        const ids = ["date", "driverName", "from", "to", "carrier", "milesDriving", "mileageToday", "officeAddress", "terminalAddress", "truckInfo", "manifest", "shippingDocs", "commodity", "remarks", "dutyNotes"];
+        ids.forEach((id) => {
+          if (typeof parsed[id] !== "undefined") document.getElementById(id).value = parsed[id];
+        });
+        if (Array.isArray(parsed.hourStatus) && parsed.hourStatus.length === 24) {
+          hourStatus = parsed.hourStatus.map((x) => Math.max(0, Math.min(3, Number(x) || 0)));
+        }
+      } catch (err) {
+        console.error("Invalid prefill payload", err);
+      }
+    }
+
+    document.getElementById("clearDay").addEventListener("click", () => {
+      hourStatus = new Array(24).fill(0);
+      paint();
+    });
+    document.getElementById("exportJson").addEventListener("click", () => {
+      const data = {
+        date: document.getElementById("date").value,
+        driverName: document.getElementById("driverName").value,
+        from: document.getElementById("from").value,
+        to: document.getElementById("to").value,
+        carrier: document.getElementById("carrier").value,
+        milesDriving: document.getElementById("milesDriving").value,
+        mileageToday: document.getElementById("mileageToday").value,
+        officeAddress: document.getElementById("officeAddress").value,
+        terminalAddress: document.getElementById("terminalAddress").value,
+        truckInfo: document.getElementById("truckInfo").value,
+        manifest: document.getElementById("manifest").value,
+        shippingDocs: document.getElementById("shippingDocs").value,
+        commodity: document.getElementById("commodity").value,
+        remarks: document.getElementById("remarks").value,
+        dutyNotes: document.getElementById("dutyNotes").value,
+        hourStatus,
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "drivers-daily-log.json";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
+
+    window.addEventListener("mouseup", () => { dragging = false; });
+    renderScale();
+    renderRows();
+    prefillFromQuery();
+    paint();
+  </script>
+</body>
+</html>
