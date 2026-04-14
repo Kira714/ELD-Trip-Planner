@@ -8,12 +8,16 @@ This project is configured for Render Blueprint deployment using `render.yaml`.
 - `eld-trip-planner-frontend` (Static site, Vite build)
 - `eld-trip-planner-db` (PostgreSQL)
 
+All services are configured to `plan: free` in `render.yaml`.
+
 ## One-Time Setup
 
 1. Push this repository to GitHub.
 2. In Render, click **New +** -> **Blueprint**.
 3. Select your repo and confirm `render.yaml`.
 4. Render will provision backend, frontend, and database.
+
+If your Render account/region does not offer a free PostgreSQL instance, create a free Neon or Supabase Postgres DB and set `DATABASE_URL` manually on backend, then remove/comment the `databases:` block from `render.yaml`.
 
 ## Important Post-Deploy Update
 
