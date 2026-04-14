@@ -6,6 +6,7 @@ Both APIs are free with no key required.
 import requests
 import math
 import time
+import os
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_URL = "http://router.project-osrm.org/route/v1/driving"
@@ -40,6 +41,30 @@ _FALLBACK_LOCATIONS = [
     "New York, NY",
 ]
 
+_FALLBACK_CITY_COORDS = {
+    "chicago, il": {"lat": 41.8781, "lng": -87.6298},
+    "st louis, mo": {"lat": 38.6270, "lng": -90.1994},
+    "saint louis, mo": {"lat": 38.6270, "lng": -90.1994},
+    "dallas, tx": {"lat": 32.7767, "lng": -96.7970},
+    "houston, tx": {"lat": 29.7604, "lng": -95.3698},
+    "atlanta, ga": {"lat": 33.7490, "lng": -84.3880},
+    "nashville, tn": {"lat": 36.1627, "lng": -86.7816},
+    "indianapolis, in": {"lat": 39.7684, "lng": -86.1581},
+    "kansas city, mo": {"lat": 39.0997, "lng": -94.5786},
+    "denver, co": {"lat": 39.7392, "lng": -104.9903},
+    "los angeles, ca": {"lat": 34.0522, "lng": -118.2437},
+    "phoenix, az": {"lat": 33.4484, "lng": -112.0740},
+    "seattle, wa": {"lat": 47.6062, "lng": -122.3321},
+    "miami, fl": {"lat": 25.7617, "lng": -80.1918},
+    "columbus, oh": {"lat": 39.9612, "lng": -82.9988},
+    "memphis, tn": {"lat": 35.1495, "lng": -90.0490},
+    "louisville, ky": {"lat": 38.2527, "lng": -85.7585},
+    "cincinnati, oh": {"lat": 39.1031, "lng": -84.5120},
+    "minneapolis, mn": {"lat": 44.9778, "lng": -93.2650},
+    "salt lake city, ut": {"lat": 40.7608, "lng": -111.8910},
+    "new york, ny": {"lat": 40.7128, "lng": -74.0060},
+}
+
 
 def _cache_get(cache, key):
     entry = cache.get(key)
@@ -54,6 +79,26 @@ def _cache_get(cache, key):
 
 def _cache_set(cache, key, value, ttl_sec):
     cache[key] = (time.time() + ttl_sec, value)
+
+
+def _fallback_geocode(location: str):
+    normalized = location.strip().lower()
+    if normalized in _FALLBACK_CITY_COORDS:
+        coords = _FALLBACK_CITY_COORDS[normalized]
+        return {
+            "lat": coords["lat"],
+            "lng": coords["lng"],
+            "display_name": location,
+        }
+    # Loose contains fallback (e.g. "Chicago, Illinois, USA")
+    for city_key, coords in _FALLBACK_CITY_COORDS.items():
+        if city_key in normalized or normalized in city_key:
+            return {
+                "lat": coords["lat"],
+                "lng": coords["lng"],
+                "display_name": city_key.title(),
+            }
+    return None
 
 
 def geocode(location: str) -> dict:
@@ -72,6 +117,9 @@ def geocode(location: str) -> dict:
         "limit": 1,
         "countrycodes": "us",
     }
+    nominatim_email = os.environ.get("NOMINATIM_EMAIL", "").strip()
+    if nominatim_email:
+        params["email"] = nominatim_email
     try:
         resp = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=6)
         resp.raise_for_status()
@@ -88,7 +136,11 @@ def geocode(location: str) -> dict:
     except Exception as e:
         print(f"Geocoding failed for '{location}': {e}")
 
-    # Fallback: return None so caller can handle
+    # Fallback: built-in city/state resolver for common US logistics cities.
+    fallback = _fallback_geocode(location)
+    if fallback:
+        _cache_set(_geocode_cache, cache_key, fallback, GEOCODE_CACHE_TTL_SEC)
+        return fallback
     return None
 
 
