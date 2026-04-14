@@ -25,6 +25,8 @@ After first deploy, set these env vars on backend to your final domains:
 - `CORS_ALLOWED_ORIGINS`
 - `CSRF_TRUSTED_ORIGINS`
 
+If Render health checks fail with repeated `400` on `/api/healthz/`, set `DJANGO_ALLOWED_HOSTS` to `*` temporarily, redeploy, then tighten it once your exact Render backend hostname is confirmed.
+
 If Render assigned different names than defaults in `render.yaml`, update:
 
 - backend `DJANGO_ALLOWED_HOSTS` to your backend host
