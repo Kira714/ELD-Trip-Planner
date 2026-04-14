@@ -5,10 +5,55 @@ Both APIs are free with no key required.
 
 import requests
 import math
+import time
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_URL = "http://router.project-osrm.org/route/v1/driving"
 HEADERS = {"User-Agent": "ELDTripPlanner/1.0 (educational project)"}
+SUGGEST_CACHE_TTL_SEC = 60 * 30
+GEOCODE_CACHE_TTL_SEC = 60 * 60
+
+_suggest_cache = {}
+_geocode_cache = {}
+
+# Fallback suggestions used when provider is unavailable or returns nothing.
+_FALLBACK_LOCATIONS = [
+    "Chicago, IL",
+    "St Louis, MO",
+    "Dallas, TX",
+    "Houston, TX",
+    "Atlanta, GA",
+    "Nashville, TN",
+    "Indianapolis, IN",
+    "Kansas City, MO",
+    "Denver, CO",
+    "Los Angeles, CA",
+    "Phoenix, AZ",
+    "Seattle, WA",
+    "Miami, FL",
+    "Columbus, OH",
+    "Memphis, TN",
+    "Louisville, KY",
+    "Cincinnati, OH",
+    "Minneapolis, MN",
+    "Salt Lake City, UT",
+    "New York, NY",
+]
+
+
+def _cache_get(cache, key):
+    entry = cache.get(key)
+    if not entry:
+        return None
+    expires_at, value = entry
+    if expires_at < time.time():
+        cache.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(cache, key, value, ttl_sec):
+    cache[key] = (time.time() + ttl_sec, value)
 
 
 def geocode(location: str) -> dict:
@@ -16,6 +61,11 @@ def geocode(location: str) -> dict:
     Geocode a location string to lat/lng using Nominatim.
     Returns {"lat": float, "lng": float, "display_name": str}
     """
+    cache_key = location.strip().lower()
+    cached = _cache_get(_geocode_cache, cache_key)
+    if cached:
+        return cached
+
     params = {
         "q": location,
         "format": "json",
@@ -28,11 +78,13 @@ def geocode(location: str) -> dict:
         results = resp.json()
         if results:
             r = results[0]
-            return {
+            resolved = {
                 "lat": float(r["lat"]),
                 "lng": float(r["lon"]),
                 "display_name": r.get("display_name", location),
             }
+            _cache_set(_geocode_cache, cache_key, resolved, GEOCODE_CACHE_TTL_SEC)
+            return resolved
     except Exception as e:
         print(f"Geocoding failed for '{location}': {e}")
 
@@ -47,6 +99,11 @@ def suggest_locations(query: str, limit: int = 5) -> list:
     """
     if not query or len(query.strip()) < 2:
         return []
+    normalized = query.strip().lower()
+    cache_key = f"{normalized}:{limit}"
+    cached = _cache_get(_suggest_cache, cache_key)
+    if cached is not None:
+        return cached
 
     params = {
         "q": query.strip(),
@@ -66,10 +123,24 @@ def suggest_locations(query: str, limit: int = 5) -> list:
                 "lat": float(item["lat"]),
                 "lng": float(item["lon"]),
             })
-        return suggestions
+        if suggestions:
+            _cache_set(_suggest_cache, cache_key, suggestions, SUGGEST_CACHE_TTL_SEC)
+            return suggestions
     except Exception as e:
         print(f"Location suggest failed for '{query}': {e}")
-        return []
+    # Graceful fallback when provider is down/rate-limited.
+    fallback = []
+    for item in _FALLBACK_LOCATIONS:
+        if normalized in item.lower():
+            fallback.append({
+                "display_name": item,
+                "lat": 0.0,
+                "lng": 0.0,
+            })
+        if len(fallback) >= limit:
+            break
+    _cache_set(_suggest_cache, cache_key, fallback, SUGGEST_CACHE_TTL_SEC)
+    return fallback
 
 
 def get_route(waypoints: list) -> dict:
