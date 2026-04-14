@@ -25,8 +25,9 @@ services:
           name: eld-trip-planner-db
           property: connectionString
 
-  - type: static_site
+  - type: web
     name: eld-trip-planner-frontend
+    env: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
