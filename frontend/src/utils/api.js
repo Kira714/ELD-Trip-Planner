@@ -8,8 +8,8 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 const locationSuggestionCache = new Map()
-const locationSuggestionInFlight = new Map()
-const FALLBACK_LOCATIONS = [
+// Keep this list in sync with backend/eldapp/offline_us_locations.py OFFLINE_PLACES.
+const HARDCODED_LOCATIONS = [
   'Chicago, IL',
   'St Louis, MO',
   'Dallas, TX',
@@ -30,15 +30,84 @@ const FALLBACK_LOCATIONS = [
   'Minneapolis, MN',
   'Salt Lake City, UT',
   'New York, NY',
+  'Boston, MA',
+  'Philadelphia, PA',
+  'Washington, DC',
+  'Baltimore, MD',
+  'Charlotte, NC',
+  'Raleigh, NC',
+  'Jacksonville, FL',
+  'Tampa, FL',
+  'Orlando, FL',
+  'San Antonio, TX',
+  'Austin, TX',
+  'Fort Worth, TX',
+  'Oklahoma City, OK',
+  'Tulsa, OK',
+  'Albuquerque, NM',
+  'Las Vegas, NV',
+  'San Diego, CA',
+  'San Francisco, CA',
+  'Sacramento, CA',
+  'Portland, OR',
+  'Boise, ID',
+  'Detroit, MI',
+  'Milwaukee, WI',
+  'Omaha, NE',
+  'Des Moines, IA',
+  'Little Rock, AR',
+  'Birmingham, AL',
+  'Mobile, AL',
+  'New Orleans, LA',
+  'Shreveport, LA',
+  'Jackson, MS',
+  'Knoxville, TN',
+  'Chattanooga, TN',
+  'Lexington, KY',
+  'Richmond, VA',
+  'Norfolk, VA',
+  'Charleston, SC',
+  'Savannah, GA',
+  'Buffalo, NY',
+  'Pittsburgh, PA',
+  'Cleveland, OH',
+  'Toledo, OH',
+  'El Paso, TX',
+  'Laredo, TX',
+  'Corpus Christi, TX',
+  'Baton Rouge, LA',
+  'Green Bay, WI',
+  'Fargo, ND',
+  'Sioux Falls, SD',
+  'Cheyenne, WY',
+  'Anchorage, AK',
+  'Honolulu, HI',
 ]
 
-function localFallbackSuggestions(query, limit) {
-  const q = (query || '').trim().toLowerCase()
+function normalizeLocationText(value) {
+  return (value || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim()
+}
+
+function hasWordPrefix(queryNorm, candidateNorm) {
+  return candidateNorm.split(/[,\s]+/).some((word) => word && word.startsWith(queryNorm))
+}
+
+function localHardcodedSuggestions(query, limit) {
+  const q = normalizeLocationText(query)
   if (!q) return []
-  return FALLBACK_LOCATIONS
-    .filter((name) => name.toLowerCase().includes(q))
+  const scored = HARDCODED_LOCATIONS.map((name) => {
+    const n = normalizeLocationText(name)
+    let score = 0
+    if (n.startsWith(q)) score = 100 - n.length
+    else if (q.length >= 4 && n.includes(q)) score = 50
+    else if (hasWordPrefix(q, n)) score = 55
+    return { name, score }
+  })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score)
     .slice(0, limit)
-    .map((display_name) => ({ display_name, lat: 0, lng: 0 }))
+    .map((row) => ({ display_name: row.name, lat: 0, lng: 0 }))
+  return scored
 }
 
 export async function calculateTrip(payload) {
@@ -62,31 +131,9 @@ export async function suggestLocations(query, limit = 5, signal) {
   if (locationSuggestionCache.has(key)) {
     return locationSuggestionCache.get(key)
   }
-  if (locationSuggestionInFlight.has(key)) {
-    return locationSuggestionInFlight.get(key)
-  }
-  const request = (async () => {
-    try {
-      const response = await api.get('/api/location-suggest/', {
-        params: { q: query.trim(), limit },
-        // 5s was frequently aborting in production while backend was still processing.
-        timeout: 12000,
-        signal,
-      })
-      const suggestions = response.data?.suggestions || []
-      locationSuggestionCache.set(key, suggestions)
-      return suggestions
-    } catch (err) {
-      if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
-        return []
-      }
-      const fallback = localFallbackSuggestions(query, limit)
-      locationSuggestionCache.set(key, fallback)
-      return fallback
-    } finally {
-      locationSuggestionInFlight.delete(key)
-    }
-  })()
-  locationSuggestionInFlight.set(key, request)
-  return request
+  // Intentionally frontend-only hardcoded suggestions: no API dependency for autocomplete.
+  if (signal?.aborted) return []
+  const suggestions = localHardcodedSuggestions(query, limit)
+  locationSuggestionCache.set(key, suggestions)
+  return suggestions
 }
