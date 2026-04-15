@@ -8,6 +8,8 @@ import math
 import time
 import os
 
+from eldapp.offline_us_locations import offline_geocode, offline_suggest
+
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSRM_URL = "http://router.project-osrm.org/route/v1/driving"
 HEADERS = {"User-Agent": "ELDTripPlanner/1.0 (educational project)"}
@@ -103,13 +105,27 @@ def _fallback_geocode(location: str):
 
 def geocode(location: str) -> dict:
     """
-    Geocode a location string to lat/lng using Nominatim.
+    Geocode a location string to lat/lng.
+    Tries offline US reference first (reliable in prod), then Nominatim, then legacy fallback.
     Returns {"lat": float, "lng": float, "display_name": str}
     """
     cache_key = location.strip().lower()
     cached = _cache_get(_geocode_cache, cache_key)
     if cached:
         return cached
+
+    # Offline DB first: avoids Nominatim blocking/timeouts on common lanes (e.g. Chicago, IL).
+    off = offline_geocode(location)
+    if off:
+        _cache_set(_geocode_cache, cache_key, off, GEOCODE_CACHE_TTL_SEC)
+        return off
+
+    skip_remote = os.environ.get("SKIP_NOMINATIM", "").lower() in ("1", "true", "yes")
+    if skip_remote:
+        fb = _fallback_geocode(location)
+        if fb:
+            _cache_set(_geocode_cache, cache_key, fb, GEOCODE_CACHE_TTL_SEC)
+        return fb
 
     params = {
         "q": location,
@@ -146,17 +162,28 @@ def geocode(location: str) -> dict:
 
 def suggest_locations(query: str, limit: int = 5) -> list:
     """
-    Return up to `limit` location suggestions from Nominatim.
+    Return up to `limit` location suggestions: offline matches merged with Nominatim.
     Each item: {"display_name": str, "lat": float, "lng": float}
     """
     if not query or len(query.strip()) < 2:
         return []
     normalized = query.strip().lower()
-    cache_key = f"{normalized}:{limit}"
+    # v2 cache key: older entries used lat/lng 0.0 for string fallbacks.
+    cache_key = f"v2:{normalized}:{limit}"
     cached = _cache_get(_suggest_cache, cache_key)
     if cached is not None:
         return cached
 
+    offline = offline_suggest(query, limit)
+    skip_remote = os.environ.get("SKIP_NOMINATIM", "").lower() in ("1", "true", "yes")
+    # Very short queries match noise on Nominatim ("chi" -> unrelated "CHI" venues).
+    short_query = len(normalized) <= 3
+    if skip_remote or short_query:
+        out = offline[:limit]
+        _cache_set(_suggest_cache, cache_key, out, SUGGEST_CACHE_TTL_SEC)
+        return out
+
+    remote = []
     params = {
         "q": query.strip(),
         "format": "json",
@@ -168,31 +195,50 @@ def suggest_locations(query: str, limit: int = 5) -> list:
         resp = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=4)
         resp.raise_for_status()
         results = resp.json() or []
-        suggestions = []
         for item in results:
-            suggestions.append({
+            remote.append({
                 "display_name": item.get("display_name", ""),
                 "lat": float(item["lat"]),
                 "lng": float(item["lon"]),
             })
-        if suggestions:
-            _cache_set(_suggest_cache, cache_key, suggestions, SUGGEST_CACHE_TTL_SEC)
-            return suggestions
     except Exception as e:
         print(f"Location suggest failed for '{query}': {e}")
-    # Graceful fallback when provider is down/rate-limited.
-    fallback = []
-    for item in _FALLBACK_LOCATIONS:
-        if normalized in item.lower():
-            fallback.append({
-                "display_name": item,
-                "lat": 0.0,
-                "lng": 0.0,
-            })
-        if len(fallback) >= limit:
+
+    seen = set()
+    merged = []
+    for item in offline + remote:
+        name = (item.get("display_name") or "").strip()
+        if not name:
+            continue
+        k = name.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append(item)
+        if len(merged) >= limit:
             break
-    _cache_set(_suggest_cache, cache_key, fallback, SUGGEST_CACHE_TTL_SEC)
-    return fallback
+
+    if not merged:
+        for item in _FALLBACK_LOCATIONS:
+            if normalized in item.lower():
+                og = offline_geocode(item)
+                if og:
+                    merged.append({
+                        "display_name": og["display_name"],
+                        "lat": og["lat"],
+                        "lng": og["lng"],
+                    })
+                else:
+                    merged.append({
+                        "display_name": item,
+                        "lat": 0.0,
+                        "lng": 0.0,
+                    })
+            if len(merged) >= limit:
+                break
+
+    _cache_set(_suggest_cache, cache_key, merged, SUGGEST_CACHE_TTL_SEC)
+    return merged[:limit]
 
 
 def get_route(waypoints: list) -> dict:

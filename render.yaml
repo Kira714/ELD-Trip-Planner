@@ -22,6 +22,9 @@ services:
         value: https://eld-trip-planner-frontend.onrender.com,https://eld-trip-planner-backend-rt3j.onrender.com
       - key: DJANGO_SECRET_KEY
         generateValue: true
+      # Set to True if Nominatim blocks your host; geocode/suggest still work via offline DB.
+      - key: SKIP_NOMINATIM
+        value: "False"
 
   - type: web
     name: eld-trip-planner-frontend
